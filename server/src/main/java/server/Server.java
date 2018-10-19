@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
 public class Server {
 
@@ -19,9 +20,11 @@ public class Server {
 	private int port = 3001;
 	private ExecutorService es;
 	private static List<Socket> clients = new ArrayList<Socket>();
+	private static Object yeet = new Object();
+	private Semaphore semaphore = new Semaphore(THREAD_COUNT);
 
 	public Server() {
-		es = Executors.newFixedThreadPool(THREAD_COUNT);
+		es = Executors.newCachedThreadPool();
 		try {
 			ss = new ServerSocket(port);
 		} catch (IOException e1) {
@@ -29,13 +32,19 @@ public class Server {
 		}
 		while (true) {
 			try {
-				System.out.println(ss.getInetAddress().toString());
-				client = ss.accept();
-				// start thread
-				Thread t = new ServerThread(client);
-				clients.add(client);
-				es.execute(t);
-				System.out.println("here");
+				if (semaphore.tryAcquire()) {
+					synchronized (yeet) {
+						client = ss.accept();
+						System.out.println("Connection accepted " + clients.size());
+						// start thread
+						Thread t = new ServerThread(client);
+						clients.add(client);
+						es.execute(t);
+					}
+				} else {
+					client = ss.accept();
+					client.close();
+				}
 			} catch (IOException e) {
 				// e.printStackTrace();
 			}
@@ -61,25 +70,26 @@ public class Server {
 		public void run() {
 			try {
 				String message = in.readLine();
-				System.out.println("Recieved " + message);
 				sendMessage(client.getRemoteSocketAddress() + " " + message);
-			} catch (IOException e) {
-				e.printStackTrace();
+			} catch (Exception e) {
+				// e.printStackTrace();
+				// semaphore.release();
 			}
 
 		}
 
 		private void sendMessage(String message) {
-			System.out.println("Number of clients: " + clients.size());
-			for (Socket s : clients) {
-				if (!s.equals(client)) {
-					try {
-						out = new PrintWriter(s.getOutputStream(), true);
-						out.println(message);
-						out.flush();
+			synchronized (yeet) {
+				for (Socket s : clients) {
+					if (!s.equals(client)) {
+						try {
+							out = new PrintWriter(s.getOutputStream(), true);
+							out.println(message);
+							out.flush();
 
-					} catch (IOException e) {
-						e.printStackTrace();
+						} catch (IOException e) {
+							e.printStackTrace();
+						}
 					}
 				}
 			}
